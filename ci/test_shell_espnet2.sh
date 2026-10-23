@@ -35,9 +35,26 @@ set -euo pipefail
 echo "=== run shellcheck ==="
 rm -fv tools/Miniconda*.sh  # exclude from schellcheck
 rm -fv tools/Miniforge*.sh  # exclude from schellcheck
-find utils ci doc egs2/TEMPLATE/*/scripts egs2/TEMPLATE/*/setup.sh tools/*.sh -name "*.sh" -printf "=> %p\n" -execdir shellcheck -Calways -x -e SC2001 -e SC1091 -e SC2086 {} \; | tee check_shellcheck
-find egs2/*/*/local/data.sh -printf "=> %p\n" -execdir sh -c 'cd .. ; shellcheck -Calways -x -e SC2001 -e SC1091 -e SC2086 local/$1 ; ' -- {} \; | tee -a check_shellcheck
-find egs2 \( -name "run.sh" -o -name asr.sh -o -name tts.sh -o -name enh.sh \) -printf "=> %p\n" -execdir shellcheck -Calways -x -e SC2001 -e SC1091 -e SC2086 {} \; | tee -a check_shellcheck
+# Each shellcheck process is single-threaded: check files in parallel, $(nproc) at a time.
+# Same files, flags and working directory as the former `find -execdir` calls;
+# each file's output is printed as one "=> path" block, so the log stays readable.
+_sc() {  # $1: dir to cd into, $2: path to check from there, $3: path to print
+    local out
+    out=$(cd "$1" && shellcheck -Calways -x -e SC2001 -e SC1091 -e SC2086 "$2") || true
+    # one printf per file, so parallel writers don't split a header from its findings
+    if [ -n "${out}" ]; then printf '=> %s\n%s\n' "$3" "${out}"; else printf '=> %s\n' "$3"; fi
+}
+export -f _sc
+nj=$(nproc 2>/dev/null || echo 2)
+# shellcheck disable=SC2016
+find utils ci doc egs2/TEMPLATE/*/scripts egs2/TEMPLATE/*/setup.sh tools/*.sh -name "*.sh" -print0 \
+    | xargs -0 -n 1 -P "${nj}" bash -c '_sc "$(dirname "$1")" "./$(basename "$1")" "$1"' _ | tee check_shellcheck
+# shellcheck disable=SC2016
+find egs2/*/*/local/data.sh -print0 \
+    | xargs -0 -n 1 -P "${nj}" bash -c '_sc "$(dirname "$(dirname "$1")")" "local/./data.sh" "$1"' _ | tee -a check_shellcheck
+# shellcheck disable=SC2016
+find egs2 \( -name "run.sh" -o -name asr.sh -o -name tts.sh -o -name enh.sh \) -print0 \
+    | xargs -0 -n 1 -P "${nj}" bash -c '_sc "$(dirname "$1")" "./$(basename "$1")" "$1"' _ | tee -a check_shellcheck
 
 if grep -q "SC[0-9]\{4\}" check_shellcheck; then
     echo "[ERROR] shellcheck failed"

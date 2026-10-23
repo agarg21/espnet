@@ -1,6 +1,7 @@
 name: ci on debian12
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -59,7 +60,7 @@ env:
 jobs:
   unit_test_espnet2_and_espnet3_on_debian12:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     container:
       image: debian:12
       env:
@@ -74,7 +75,7 @@ jobs:
         with:
           persist-credentials: false
       - name: check OS
-        run: cat /etc/os-release
+        run: cat /etc/os-release; nproc
       - name: install dependencies
         run: |
           apt-get update -qq
@@ -85,6 +86,7 @@ jobs:
           localedef -f UTF-8 -i en_US en_US
       - name: Get PR labels
         id: pr-labels
+        if: github.event_name == 'pull_request'
         uses: joerick/pr-labels-action@0543b277721e852d821c6738d449f2f4dea03d5f # v1.0.9
       - name: install espnet
         run: ./ci/install.sh
